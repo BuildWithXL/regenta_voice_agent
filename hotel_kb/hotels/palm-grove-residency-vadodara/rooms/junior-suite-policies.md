@@ -1,0 +1,27 @@
+---
+type: policy
+title: Junior Suite policies
+description: Cancellation and payment policy for the Junior Suite at Palm Grove Residency, Vadodara.
+tags: [policy, cancellation, cancel, refund, payment, guarantee, advance, junior suite]
+timestamp: 2026-10-12
+hotel_id: 6655bf7e84d356dd64db841b
+hotel: Palm Grove Residency, Vadodara
+room_id: 66de919cca2760237eca0ab8
+source: mongodb
+generated: true
+---
+
+# Junior Suite policies
+
+## Spoken answer
+
+### en
+Cancellation policy: If cancellation is done 3 or more days prior to arrival, then full amount will be refunded. Payment guarantee: A credit card is required to secure your reservation.
+
+## Details
+- Cancellation policy: If cancellation is done 3 or more days prior to arrival, then full amount will be refunded. If cancellation is done within 72 hours of arrival, then full amount will be charged.
+- Payment guarantee: A credit card is required to secure your reservation. If you use a debit or credit card at check-in, a hold may be placed on your account for the anticipated total cost, including estimated incidentals, until check-out. This hold may not be released for up to 72 hours after check-out, or possibly longer, depending on your card issuer's policies.
+- Rate inclusions: Accommodation on room only, Applicable taxes extra
+- Member cancellation policy: If cancellation is done 3 or more days prior to arrival, then full amount will be refunded. If cancellation is done within 72 hours of arrival, then full amount will be charged.
+- Member payment guarantee: A credit card is required to secure your reservation. If you use a debit or credit card at check-in, a hold may be placed on your account for the anticipated total cost, including estimated incidentals, until check-out. This hold may not be released for up to 72 hours after check-out, or possibly longer, depending on your card issuer's policies.
+- Member benefits: Priority Check In, Complimentary Buffet Breakfast, Complimentary High Speed Wi-fi, Complimentary Drinks on Arrival

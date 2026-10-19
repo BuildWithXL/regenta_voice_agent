@@ -1,0 +1,18 @@
+{
+  "_help": "Fill in real values. Empty entries are treated as 'unknown', so the agent will offer a ticket or a human instead of guessing. 'hotels' keys are matched against the hotel name (case-insensitive, partial match).",
+  "default": {
+    "check_in_time": "",
+    "check_out_time": "",
+    "cancellation_policy": "",
+    "address": "",
+    "contact_phone": "",
+    "amenities": "",
+    "parking": "",
+    "breakfast": "",
+    "payment_methods": "",
+    "pets_policy": "",
+    "early_check_in_late_check_out": "",
+    "id_requirements": ""
+  },
+  "hotels": {}
+}

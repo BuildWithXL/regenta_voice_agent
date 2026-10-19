@@ -1,0 +1,16 @@
+python-dotenv>=1.0.0
+httpx>=0.27.0
+sounddevice>=0.4.7
+numpy>=1.26.0
+groq>=0.11.0
+deepgram-sdk>=7.6.0
+motor
+phonenumbers
+sarvamai>=0.1.35
+pyyaml
+
+# Phone calls (plivo_server.py)
+plivo>=4.50
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9

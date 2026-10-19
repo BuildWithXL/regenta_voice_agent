@@ -1,0 +1,2 @@
+pymongo>=4.6     # kb_build.py (read-only MongoDB access); installed with motor too
+boto3>=1.34      # only needed when KB_STORAGE=s3
