@@ -87,7 +87,7 @@ class Settings:
     HOTEL_INFO_PATH = os.getenv("HOTEL_INFO_PATH", "hotel_info.json")
 
     # --- Phone calls: Plivo (plivo_server.py) ---
-    PLIVO_NUMBER = os.getenv("PLIVO_NUMBER", "+912264232810")    # the number callers dial
+    PLIVO_NUMBER = os.getenv("PLIVO_NUMBER", "")    # the number callers dial; transfers' caller ID
     # Public https URL of this server, e.g. https://voice.example.com (no trailing slash).
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
     HUMAN_AGENT_NUMBER = os.getenv("HUMAN_AGENT_NUMBER", "")      # transfers dial this

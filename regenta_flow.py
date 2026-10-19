@@ -19,6 +19,8 @@ from __future__ import annotations
 import difflib
 import re
 
+import phonenumbers
+
 import booking_agent as ba
 import mongo
 import okf_store
@@ -263,11 +265,19 @@ async def _topic_answer(session: Session, hotel: dict, question: str) -> str | N
     return reply
 
 
-def _dial_number(raw) -> str | None:
+def dial_number(raw) -> str | None:
+    """'9902954007' / '+91 99029 54007' / '09902954007' -> '919902954007'; None unless it
+    is a valid Indian number (91 + 10 digits), so a bad record is never dialled."""
     digits = re.sub(r"\D", "", str(raw or "")).lstrip("0")    # '0' trunk prefix: national number
     if len(digits) == 10:
         digits = "91" + digits              # stored without country code (Indian numbers)
-    return "+" + digits if len(digits) >= 10 else None
+    if not re.fullmatch(r"91[2-9]\d{9}", digits):
+        return None
+    try:
+        parsed = phonenumbers.parse("+" + digits)
+    except phonenumbers.NumberParseException:
+        return None
+    return digits if phonenumbers.is_valid_number(parsed) else None
 
 
 async def _transfer(session: Session, team: str) -> str:
@@ -279,7 +289,7 @@ async def _transfer(session: Session, team: str) -> str:
     except Exception as exc:
         print(f"  [regenta] transfer number lookup failed: {exc!r}")
         raw = None
-    number = _dial_number(raw)
+    number = dial_number(raw)
     if not number:
         print(f"  [regenta] WARNING: no {team} number for {hotel['name']} ({hotel['id']}); not transferring")
         return (f"I'm sorry, our {_TEAMS[team]} at {name} can't be reached on this line "

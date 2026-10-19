@@ -34,6 +34,7 @@ from ai_response import build_handoff_summary, close as close_groq, opening_line
 from audio_sources import PhoneAudioStream
 from config import require, settings
 from conversation import END_STAGES, _TRANSFERRING, converse
+from regenta_flow import dial_number
 from sarvam_stt_client import stream_transcribe
 from session import Session, Stage, store
 from stt_router import TurnGate, with_turn_gate
@@ -45,8 +46,14 @@ _FRAME_BYTES = _RATE * 2 // 10         # 100 ms of PCM16 per playAudio message
 # CallUUID -> caller number, from /plivo/answer until the stream starts.
 # A stream whose callId isn't here was not announced by Plivo and is refused.
 _pending_calls: dict[str, str] = {}
-# CallUUID -> number its transfer dials (the hotel's team); others use HUMAN_AGENT_NUMBER.
-_transfer_targets: dict[str, str] = {}
+# CallUUID -> {"number", "what"} its transfer dials (the hotel's team, or HUMAN_AGENT_NUMBER).
+_transfer_targets: dict[str, dict[str, str]] = {}
+
+_DIAL_TIMEOUT = 25                   # seconds the human's phone rings before the fallback
+_UNAVAILABLE = ("Sorry, our team is unavailable right now. "
+                "Please call us again in a little while. Goodbye.")
+_TRANSFER_FAILED = ("Sorry, I couldn't connect your call right now. "
+                    "Please call us again in a little while. Goodbye.")
 
 
 @asynccontextmanager
@@ -102,6 +109,12 @@ def _plivo_number(number: str) -> str:
     return "".join(ch for ch in number if ch.isdigit())
 
 
+def _mask(number: str | None) -> str:
+    """'919902954007' -> '9199******07' for logs."""
+    d = _plivo_number(number or "")
+    return d[:4] + "*" * max(0, len(d) - 6) + d[-2:] if len(d) > 6 else (d or "-")
+
+
 @app.post("/plivo/answer")
 async def answer(request: Request) -> Response:
     params = await _plivo_params(request)
@@ -122,34 +135,46 @@ async def answer(request: Request) -> Response:
 
 @app.post("/plivo/transfer")
 async def transfer(request: Request) -> Response:
-    """XML for a call being handed to a human (see _transfer_call)."""
+    """XML Plivo fetches for the transferred A-leg (aleg_url in _transfer_call):
+    <Dial callerId=PLIVO_NUMBER><Number>91XXXXXXXXXX</Number></Dial>, then the
+    fallback message if nobody answers."""
     params = await _plivo_params(request)
-    human = _plivo_number(_transfer_targets.get(params.get("CallUUID", ""))
-                          or settings.HUMAN_AGENT_NUMBER)
-    legs = {_plivo_number(params.get("From", ""))[-10:], _plivo_number(params.get("To", ""))[-10:]}
-    print(f"[plivo] transfer: dialing {human}; this call is From={params.get('From')} To={params.get('To')}")
-    if human[-10:] in legs:
-        print("[plivo] WARNING: the transfer number is the same phone as this call; it will ring busy")
+    call_uuid = params.get("CallUUID", "")
+    target = _transfer_targets.get(call_uuid) or {"number": settings.HUMAN_AGENT_NUMBER, "what": "human agent"}
+    human, caller_id = dial_number(target["number"]), dial_number(settings.PLIVO_NUMBER)
     response = plivoxml.ResponseElement()
-    dial = plivoxml.DialElement(caller_id=_plivo_number(settings.PLIVO_NUMBER),
-        timeout=20,
-        action=_public_url("/plivo/transfer-status"),
-        method="POST",
-    )
+    if not (human and caller_id):
+        print(f"[transfer] XML hit call={call_uuid} {target['what']}: no valid "
+              f"{'number' if not human else 'PLIVO_NUMBER caller ID'} -> fallback message")
+        response.add(plivoxml.SpeakElement(_TRANSFER_FAILED))
+        response.add(plivoxml.HangupElement())
+        return _xml(response)
+    legs = {_plivo_number(params.get("From", ""))[-10:], _plivo_number(params.get("To", ""))[-10:]}
+    print(f"[transfer] XML hit call={call_uuid} {target['what']} -> Dial {_mask(human)} "
+          f"callerId={_mask(caller_id)} timeout={_DIAL_TIMEOUT}s")
+    if human[-10:] in legs:
+        print("[transfer] WARNING: the transfer number is the same phone as this call; it will ring busy")
+    dial = plivoxml.DialElement(caller_id=caller_id, timeout=_DIAL_TIMEOUT,
+                                action=_public_url("/plivo/transfer-status"), method="POST")
     dial.add(plivoxml.NumberElement(human))
     response.add(dial)
     return _xml(response)
+
 
 @app.post("/plivo/transfer-status")
 async def transfer_status(request: Request) -> Response:
     """Plivo posts here when the <Dial> ends. If the human never talked
     to the caller, tell the caller instead of dropping into silence."""
     params = await _plivo_params(request)
-    print(f"[plivo] transfer result: {dict(params)}")
+    call_uuid = params.get("CallUUID", "")
+    what = (_transfer_targets.get(call_uuid) or {}).get("what", "human agent")
+    status = params.get("DialStatus")
+    print(f"[transfer] dial ended call={call_uuid} {what}: DialStatus={status} "
+          f"DialHangupCause={params.get('DialHangupCause')} rang={params.get('DialRingStatus')}")
     response = plivoxml.ResponseElement()
-    if params.get("DialStatus") != "completed":
-        response.add(plivoxml.SpeakElement(
-            "Sorry, no one is available right now. Please call back shortly. Goodbye."))
+    if status != "completed":
+        response.add(plivoxml.SpeakElement(_UNAVAILABLE))
+        response.add(plivoxml.HangupElement())
     return _xml(response)
 
 @app.post("/plivo/hangup")
@@ -175,20 +200,34 @@ def _rest_client() -> plivo.RestClient:
     return plivo.RestClient(require("PLIVO_AUTH_ID"), require("PLIVO_AUTH_TOKEN"))
 
 
-async def _transfer_call(call_uuid: str, tag: str, number: str | None = None) -> None:
-    if not (number or settings.HUMAN_AGENT_NUMBER):
-        print(f"{tag}[plivo] HUMAN_AGENT_NUMBER not set; hanging up instead of transferring")
-        await _hangup_call(call_uuid, tag)
-        return
-    if number:
-        _transfer_targets[call_uuid] = number
+async def _transfer_call(call_uuid: str, tag: str, session: Session) -> bool:
+    """Points the live call's A-leg at /plivo/transfer (Plivo Transfer Call API).
+    True if Plivo accepted it; the caller must then hang up the stream socket."""
+    number = session.transfer_number or settings.HUMAN_AGENT_NUMBER
+    what = session.handoff_summary or session.escalation_reason or "human agent"
+    url = _public_url("/plivo/transfer") if settings.PUBLIC_BASE_URL else ""
+    dialled = dial_number(number)
+    line = f"{tag}[transfer] call={call_uuid} {what} number={_mask(dialled or number)} aleg_url={url or '-'}"
+    problem = ("no valid Indian number to dial" if not dialled
+               else "PLIVO_NUMBER (caller ID) is not a valid Indian number" if not dial_number(settings.PLIVO_NUMBER)
+               else "PUBLIC_BASE_URL must be the public https URL" if not url.startswith("https://")
+               or any(h in url for h in ("localhost", "127.0.0.1", "0.0.0.0")) else None)
+    if problem:
+        print(f"{line} -> NOT transferred: {problem}")
+        return False
+    _transfer_targets[call_uuid] = {"number": dialled, "what": what}
     try:
-        await asyncio.to_thread(
+        result = await asyncio.to_thread(
             _rest_client().calls.transfer, call_uuid, legs="aleg",
-            aleg_url=_public_url("/plivo/transfer"), aleg_method="POST",
+            aleg_url=url, aleg_method="POST",
         )
     except Exception as exc:
-        print(f"{tag}[plivo] transfer failed: {exc!r}")
+        print(f"{line} -> Plivo transfer API error: {exc!r}")
+        _transfer_targets.pop(call_uuid, None)
+        return False
+    print(f"{line} -> Plivo accepted: {getattr(result, 'message', result)!s} "
+          f"(api_id={getattr(result, 'api_id', '-')})")
+    return True
 
 
 async def _hangup_call(call_uuid: str, tag: str) -> None:
@@ -254,7 +293,17 @@ class _PlivoCall:
 
         if session.stage == Stage.TRANSFERRED:
             print(f"{self.tag}[handoff] {session.handoff_summary}")
-            await _transfer_call(self.call_uuid, self.tag, session.transfer_number)
+            if await _transfer_call(self.call_uuid, self.tag, session):
+                # <Stream keepCallAlive="true"> blocks any new XML until the stream
+                # disconnects, so the transfer only runs once we close our socket.
+                # Closing it does NOT hang up: the call carries on to /plivo/transfer.
+                try:
+                    await self.ws.close()
+                except Exception as exc:
+                    print(f"{self.tag}[transfer] closing the stream socket failed: {exc!r}")
+            else:                         # never leave the caller in dead air
+                await self.say(_TRANSFER_FAILED, "en")
+                await _hangup_call(self.call_uuid, self.tag)
         elif session.stage == Stage.COMPLETED:
             await _hangup_call(self.call_uuid, self.tag)
 
@@ -287,7 +336,7 @@ async def stream(ws: WebSocket) -> None:
                 task = asyncio.create_task(call.run(session))
             elif event == "stop":
                 break
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):   # RuntimeError: we closed it for a transfer
         pass
     finally:
         if call is not None:
