@@ -48,7 +48,10 @@ _CITY_ALIASES = {
     "अमदावाद": "Ahmedabad", "वडोदरा": "Vadodara", "बड़ौदा": "Vadodara", "सूरत": "Surat",
     "भुज": "Bhuj", "भरूच": "Bharuch", "जामनगर": "Jamnagar", "सोमनाथ": "Somnath",
     "वापी": "Vapi", "गांधीनगर": "Gandhinagar", "गोवा": "Goa", "जयपुर": "Jaipur",
-    "दुबई": "Dubai", "दिल्ली": "Delhi",
+    "दुबई": "Dubai", "दिल्ली": "Delhi", "बेंगलुरु": "Bengaluru", "बैंगलोर": "Bengaluru",
+    "mysuru": "Mysore", "shivamogga": "Shimoga", "belgaum": "Belagavi", "hubli": "Hubballi",
+    "kevadia": "Ekta Nagar", "statue of unity": "Ekta Nagar", "mcleod ganj": "McLeodGanj",
+    "benares": "Varanasi", "banaras": "Varanasi", "trivandrum": "Thiruvananthapuram", "cochin": "Kochi",
 }
 
 _BOOK_RE = re.compile(
@@ -141,7 +144,7 @@ def _short_name(h: dict) -> str:
 def _word_hit(word: str, said: list[str]) -> bool:
     if len(word) < 5:
         return word in said
-    return any(len(s) >= 4 and difflib.SequenceMatcher(None, s, word).ratio() >= 0.8 for s in said)
+    return any(len(s) >= 4 and difflib.SequenceMatcher(None, s, word).ratio() >= 0.85 for s in said)  # 'halls' != 'hills'
 
 
 def _hotel_named(st: dict, text: str, listing: bool) -> dict | None:
@@ -163,6 +166,14 @@ def _hotel_named(st: dict, text: str, listing: bool) -> dict | None:
         if key > best_key:
             best, best_key = h, key
     return best
+
+
+def _names_own_facility(st: dict, hotel: dict, low: str) -> bool:
+    """True if the caller named one of this hotel's halls / restaurants (already loaded)."""
+    details = (st.get("details") or {}).get(str(hotel["id"])) or {}
+    names = [h["title"] for h in details.get("banquet_halls") or []]
+    names += [str(r.get("name") or "") for r in details.get("restaurants") or []]
+    return any(n and " ".join(n.lower().split()) in low for n in names)
 
 
 def _team_asked(clean: str) -> str | None:
@@ -320,6 +331,8 @@ async def _turn(session: Session, user_message: str, clean: str) -> str:
     # 1. Room / table / banquet booking -> that hotel's team.
     team = _team_asked(clean)
     named_hotel = _hotel_named(st, clean, listing=bool(st.get("city") and not hotel))
+    if hotel and named_hotel and named_hotel != hotel and _names_own_facility(st, hotel, low):
+        named_hotel = None                           # 'Spring Hall' is this hotel's hall, not Kabini Springs
     if team and named_hotel:
         session.selected_hotel = hotel = named_hotel
         session.info_hotel = hotel["name"]

@@ -30,10 +30,11 @@ _TIME_Q_RE = re.compile(r"\b(time|timings?|open\w*|clos\w*|hours?|when)\b")
 _NUMBER_Q_RE = re.compile(r"\b(numbers?|contact|phone|call|reach)\b")
 _BAR_RE = re.compile(r"\b(bar|pub|lounge)\b")
 _RESTAURANT_RE = re.compile(r"\b(restaurants?|dining|breakfast|lunch|dinner|cafe|buffet)\b")
-_FACILITIES = (   # facility -> words, hotels flag (0/1+), amenity titles
-    ("spa", re.compile(r"\bspa\b|\bmassage\b"), "spa", ("spa",)),
-    ("gym", re.compile(r"\bgym\b|\bfitness\b"), "gym", ("fitness center",)),
-    ("pool", re.compile(r"\b(swimming )?pool\b|\bswim\w*"), "swimmingPool", ("swimming pool",)),
+_BANQUET_Q_RE = re.compile(r"\b(banquets?|halls?|venues?|lawns?|event spaces?|meeting rooms?|conference rooms?)\b")
+_FACILITIES = (   # facility -> words, hotels count field, word in amenity / service titles
+    ("spa", re.compile(r"\bspa\b|\bmassage\b"), "spa", re.compile(r"\bspa\b", re.I)),
+    ("gym", re.compile(r"\bgym\b|\bfitness\b"), "gym", re.compile(r"\bfitness\b|\bgym\b", re.I)),
+    ("pool", re.compile(r"\b(swimming )?pool\b|\bswim\w*"), "swimmingPool", re.compile(r"\bpool\b", re.I)),
 )
 
 
@@ -42,10 +43,32 @@ def is_topic(text: str) -> bool:
     low = text.lower()
     return bool(_CHECK_RE.search(low) or _PET_RE.search(low) or _POLICY_RE.search(low)
                 or _ADDRESS_RE.search(low) or _DIRECTIONS_RE.search(low) or _PARKING_RE.search(low)
-                or _AIRPORT_RE.search(low) or _STATION_RE.search(low)
+                or _AIRPORT_RE.search(low) or _STATION_RE.search(low) or _BANQUET_Q_RE.search(low)
                 or (_TIME_Q_RE.search(low) or _NUMBER_Q_RE.search(low)) and (
                     _BAR_RE.search(low) or _RESTAURANT_RE.search(low)
                     or any(rx.search(low) for _, rx, _, _ in _FACILITIES)))
+
+
+def _list(items: list[str]) -> str:
+    items = [i for i in items if i]
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
+
+
+def _capacity(raw: str) -> str | None:
+    """'Upto 350 Guests' / '350' -> 'up to 350 guests'."""
+    m = re.search(r"\d[\d,]*", raw or "")
+    return f"up to {m.group(0)} guests" if m else None
+
+
+def _hall_line(h: dict) -> str:
+    area = h["area"] if re.fullmatch(r"[\d.,]+", h["area"] or "") else ""
+    bits = [f"{area} square metres" if area else "", _capacity(h["capacity"]) or ""]
+    return f"{h['title']} ({', '.join(b for b in bits if b)})" if any(bits) else h["title"]
+
+
+def _guests(h: dict) -> int:
+    m = re.search(r"\d[\d,]*", h["capacity"] or "")
+    return int(m.group(0).replace(",", "")) if m else 0
 
 
 # ------------------------------------------------------------- speaking
@@ -166,18 +189,33 @@ def answer(details: dict, hotel_name: str, text: str) -> tuple[str, str | None] 
                               full=bool(re.search(r"\b(full|complete|exact)\b", low)))
         return (f"The address is {addr}." if addr else OFFER), None
 
-    # 4. Facilities: timings and contact numbers
+    # 4. Banquet halls (banquethalls collection)
+    halls = details.get("banquet_halls") or []
+    named_hall = [h for h in halls if h["title"] and h["title"].lower() in low]
+    if named_hall or _BANQUET_Q_RE.search(low):
+        if not halls:
+            return OFFER, None
+        if named_hall:
+            return f"{_hall_line(named_hall[0])}.", None
+        top = sorted(halls, key=_guests, reverse=True)
+        more = f", and {len(top) - 3} more" if len(top) > 3 else ""
+        count = f"{len(top)} banquet spaces" if len(top) > 1 else "one banquet space"
+        return f"The hotel has {count}: {_list([_hall_line(h) for h in top[:3]])}{more}.", None
+
+    # 5. Facilities: timings and contact numbers
     wants_time, wants_number = bool(_TIME_Q_RE.search(low)), bool(_NUMBER_Q_RE.search(low))
-    if _BAR_RE.search(low) or _RESTAURANT_RE.search(low):
+    plain = low.replace("'", "").replace("\u2019", "")
+    named = [r for r in details["restaurants"] if r.get("name")
+             and " ".join(str(r["name"]).lower().replace("'", "").replace("\u2019", "").split()) in plain]
+    if named or _BAR_RE.search(low) or _RESTAURANT_RE.search(low):
         if not (wants_time or wants_number):
             return None                              # menus / cuisine: the existing Q&A
         rest = details["restaurants"]
-        if _BAR_RE.search(low):
+        if _BAR_RE.search(low) and not named:
             rest = [r for r in rest if _BAR_RE.search(f"{r.get('name', '')} {r.get('serves', '')}".lower())]
         if not rest:
             return (f"I don't have a {'bar' if _BAR_RE.search(low) else 'restaurant'} on record "
                     f"for {hotel_name}. Is there anything else I can help you with?"), None
-        named = [r for r in rest if r.get("name") and r["name"].lower() in low]
         rest = named or rest
         if wants_number:
             r = next((r for r in rest if spoken_number(r.get("mobile"))), None)
@@ -185,24 +223,37 @@ def answer(details: dict, hotel_name: str, text: str) -> tuple[str, str | None] 
                 return f"I don't have a contact number for {rest[0].get('name', 'the restaurant')} on record.", None
             return (f"You can reach {r.get('name', 'the restaurant')} on {spoken_number(r['mobile'])}. "
                     "Would you like me to repeat that?"), spoken_number(r["mobile"])
-        lines = []
-        for r in rest[:2]:
+        items = []
+        for r in rest[:4]:
             o, c = spoken_time(r.get("open_time")), spoken_time(r.get("close_time"))
-            name = r.get("name") or "The restaurant"
-            lines.append(f"{name} is open from {o} to {c}." if o and c
-                         else f"I don't have the timings for {name} on record.")
-        if len(rest) > 2:
-            lines.append(f"There {'is' if len(rest) == 3 else 'are'} {len(rest) - 2} more outlet"
-                         f"{'' if len(rest) == 3 else 's'}; just ask me by name.")
-        return " ".join(lines), None
-    for label, rx, flag, titles in _FACILITIES:
+            name = " ".join(str(r.get("name") or "The restaurant").split())
+            where = " ".join(str(r.get("location") or "").split())
+            name = f"{name} on the {where}" if where else name
+            items.append(f"{name}, {o} to {c}" if o and c else f"{name}, timings not on record")
+        more = f" There {'is' if len(rest) == 5 else 'are'} {len(rest) - 4} more." if len(rest) > 4 else ""
+        if len(items) == 1:
+            return f"{items[0].replace(', ', ' is open from ', 1)}.{more}", None
+        return f"Opening hours: {'; '.join(items[:-1])}; and {items[-1]}.{more}", None
+    services = details.get("services") or []
+    for label, rx, flag, title_rx in _FACILITIES:
         if rx.search(low):
-            has = (hotel.get(flag) or 0) > 0 or any(t in amen for t in titles)
+            named = [t for t in services if title_rx.search(t)]
+            has = (hotel.get(flag) or 0) > 0 or any(title_rx.search(a) for a in amen) or bool(named)
             if not has:
                 return (f"I don't have a {label} on record for {hotel_name}. "
                         "Is there anything else I can help you with?"), None
-            missing = " or contact number" if wants_number else ""
-            return f"The hotel has a {label}, but I don't have its timings{missing} on record.", None
+            treatments = [t for t in details.get("wellnesses") or [] if t.lower() != "spa"]
+            special = next((t for t in named if t.lower() not in ("spa", "swimming pool", "fitness center")), None)
+            if label == "spa" and treatments:
+                line = f"Yes, the hotel has a spa offering {_list(treatments)}."
+            elif special:
+                line = f"Yes, the hotel has a {special.lower()}."
+            else:
+                line = f"Yes, the hotel has a {label}."
+            if wants_time or wants_number:
+                missing = " or contact number" if wants_number else ""
+                line += f" I don't have its timings{missing} on record."
+            return line, None
     if wants_number and re.search(r"\b(hotel|reception|front desk)\b", low):
         num = spoken_number(hotel.get("Mobile"))
         if num:

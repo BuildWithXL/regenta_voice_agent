@@ -142,21 +142,54 @@ async def get_restaurant_mobile(hotel_id: Any) -> str | None:
     return (doc or {}).get("mobile")
 
 
+def _oid(value: Any) -> Any:
+    """ObjectId for a stored/str id ('6655bb…' matches nothing as a string)."""
+    from bson import ObjectId
+    return ObjectId(value) if isinstance(value, str) and ObjectId.is_valid(value) else value
+
+
+def _oids(values: Any) -> list[Any]:
+    from bson import ObjectId
+    return [ObjectId(str(v)) for v in values or [] if ObjectId.is_valid(str(v))]
+
+
+def text_of(value: Any) -> str:
+    """Localized {'EN': '...'} / {'en': '...'} objects (or plain strings) -> text."""
+    if isinstance(value, dict):
+        value = value.get("EN") or value.get("en") or next(
+            (v for v in value.values() if isinstance(v, str) and v.strip()), "")
+    return " ".join(str(value or "").split())
+
+
+async def _titles(collection: str, ids: Any) -> list[str]:
+    cursor = _collection(collection).find(
+        {"_id": {"$in": _oids(ids)}, "status": {"$ne": "inactive"}}, {"title": 1})
+    return [t for t in [text_of(doc.get("title")) async for doc in cursor] if t]
+
+
 async def get_hotel_details(hotel_id: Any) -> dict[str, Any]:
     """Pure read — what regenta_topics answers from: the hotel's overview
-    (check-in/out, address, distances), amenity titles, facility flags,
-    phone and its active restaurants (hours, numbers)."""
-    from bson import ObjectId
+    (check-in/out, address, distances), amenity / service / wellness titles,
+    facility counts, phone, its restaurants (hours, numbers, location) and its
+    banquet halls (banquethalls.hotel, not hotelID)."""
+    hotel_id = _oid(hotel_id)
     hotel = await _collection("hotels").find_one(
-        {"_id": hotel_id}, {"amenitiesIDs": 1, "spa": 1, "gym": 1, "swimmingPool": 1, "Mobile": 1}) or {}
-    ids = [ObjectId(a) for a in hotel.get("amenitiesIDs") or [] if ObjectId.is_valid(str(a))]
-    amenities = [((doc.get("title") or {}).get("EN") or "")
-                 async for doc in _collection("amenities").find({"_id": {"$in": ids}}, {"title": 1})]
+        {"_id": hotel_id}, {"amenitiesIDs": 1, "serviceIDs": 1, "wellnessIDs": 1, "spa": 1, "gym": 1,
+                            "swimmingPool": 1, "Mobile": 1}) or {}
     overview = await _collection("hoteloverviews").find_one({"hotelID": hotel_id}) or {}
     restaurants = [doc async for doc in _collection("restaurants").find(
-        {"hotelID": hotel_id, "status": "active"},
-        {"name": 1, "open_time": 1, "close_time": 1, "mobile": 1, "serves": 1}).sort("createdAt", 1)]
-    return {"hotel": hotel, "amenities": amenities, "overview": overview, "restaurants": restaurants}
+        {"hotelID": hotel_id, "status": "active", "isVisible": {"$ne": False}},   # most have no isVisible
+        {"name": 1, "open_time": 1, "close_time": 1, "mobile": 1, "serves": 1, "location": 1}
+    ).sort("createdAt", 1)]
+    halls = [{"title": text_of(doc.get("title")), "area": text_of(doc.get("area")),
+              "capacity": text_of(doc.get("guestscapacity"))}
+             async for doc in _collection("banquethalls").find(
+                 {"hotel": hotel_id, "status": "active"},
+                 {"title": 1, "area": 1, "guestscapacity": 1}).sort("createdAt", 1)]
+    return {"hotel": hotel, "overview": overview, "restaurants": restaurants, "banquet_halls": halls,
+            "amenities": await _titles("amenities", hotel.get("amenitiesIDs")),
+            "services": await _titles("services", hotel.get("serviceIDs")),
+            "wellnesses": await _titles("wellnesses", hotel.get("wellnessIDs"))}
 
 
 async def get_rooms_for_hotel(hotel_id: Any) -> list[dict[str, Any]]:
