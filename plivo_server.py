@@ -30,10 +30,10 @@ from plivo.utils.signature_v3 import validate_v3_signature
 import config
 import mongo
 import okf_store
-from ai_response import close as close_groq, opening_line
+from ai_response import build_handoff_summary, close as close_groq, opening_line
 from audio_sources import PhoneAudioStream
 from config import require, settings
-from conversation import END_STAGES, converse
+from conversation import END_STAGES, _TRANSFERRING, converse
 from sarvam_stt_client import stream_transcribe
 from session import Session, Stage, store
 from stt_router import TurnGate, with_turn_gate
@@ -121,13 +121,33 @@ async def answer(request: Request) -> Response:
 @app.post("/plivo/transfer")
 async def transfer(request: Request) -> Response:
     """XML for a call being handed to a human (see _transfer_call)."""
-    await _plivo_params(request)
+    params = await _plivo_params(request)
+    human = _plivo_number(settings.HUMAN_AGENT_NUMBER)
+    legs = {_plivo_number(params.get("From", ""))[-10:], _plivo_number(params.get("To", ""))[-10:]}
+    print(f"[plivo] transfer: dialing {human}; this call is From={params.get('From')} To={params.get('To')}")
+    if human[-10:] in legs:
+        print("[plivo] WARNING: HUMAN_AGENT_NUMBER is the same phone as this call; it will ring busy")
     response = plivoxml.ResponseElement()
-    dial = plivoxml.DialElement(caller_id=_plivo_number(settings.PLIVO_NUMBER))
+    dial = plivoxml.DialElement(caller_id=_plivo_number(settings.PLIVO_NUMBER),
+        timeout=20,
+        action=_public_url("/plivo/transfer-status"),
+        method="POST",
+    )
     dial.add(plivoxml.NumberElement(_plivo_number(settings.HUMAN_AGENT_NUMBER)))
     response.add(dial)
     return _xml(response)
 
+@app.post("/plivo/transfer-status")
+async def transfer_status(request: Request) -> Response:
+    """Plivo posts here when the <Dial> ends. If the human never talked
+    to the caller, tell the caller instead of dropping into silence."""
+    params = await _plivo_params(request)
+    print(f"[plivo] transfer result: {dict(params)}")
+    response = plivoxml.ResponseElement()
+    if params.get("DialStatus") != "completed":
+        response.add(plivoxml.SpeakElement(
+            "Sorry, no one is available right now. Please call back shortly. Goodbye."))
+    return _xml(response)
 
 @app.post("/plivo/hangup")
 async def hangup(request: Request) -> Response:
@@ -222,7 +242,9 @@ class _PlivoCall:
                 return
             session.backend_failures += 1
             session.escalation_reason = "system_error"
+            session.handoff_summary = build_handoff_summary(session, "system_error")
             session.set_stage(Stage.TRANSFERRED)
+            await self.say(_TRANSFERRING["en"], "en")
 
         if session.stage == Stage.TRANSFERRED:
             print(f"{self.tag}[handoff] {session.handoff_summary}")

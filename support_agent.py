@@ -443,6 +443,10 @@ def _blocked_reason(session: Session, name: str, args: dict[str, Any]) -> str | 
         if args.get("confirmed") is not True or not _cancel_confirmed(session):
             return ("ask 'Do you want me to cancel booking <id>?' and wait for the "
                     "caller to say yes; only then call cancelBooking")
+    elif name == "offerHumanTransfer":
+        said = [m for m in session.conversation if m["role"] == "user"]
+        if len(said) < 2:
+            return "ask the caller one short clarifying question first; do not offer a human yet"
     elif name == "getHotelInfo":
         asked = next((m["content"] for m in reversed(session.conversation) if m["role"] == "user"), "")
         if not _TOPIC_WORDS.get(args.get("topic", ""), re.compile(r"$^")).search(asked.lower()):
