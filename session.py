@@ -129,6 +129,8 @@ class Session:
     selected_hotel: dict | None = None  # regenta_flow: {"id", "name", "city"} the caller picked
     transfer_number: str | None = None  # number a transfer dials (None: HUMAN_AGENT_NUMBER)
     regenta: dict = field(default_factory=dict)  # regenta_flow: catalogue, city, hotel list, pending transfer
+    call_language: str | None = None   # languages.json key the caller chose ("en"/"hi"/"gu"); None until then
+    language_attempts: int = 0         # unclear answers to "which language?"
     language: str = "en"     # language of the caller's most recent utterance
     available_hotels: list = None  # populated from the last list_hotels call
     available_cities: list = None  # populated from the last list_cities call

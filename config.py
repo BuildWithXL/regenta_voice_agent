@@ -99,6 +99,19 @@ class Settings:
 
 settings = Settings()
 
+
+def _load_languages() -> dict:
+    """Call languages (languages.json): per language its name, STT code/mode,
+    TTS code, voice, aliases and fixed lines. Adding a language = a new entry."""
+    import json
+    path = os.getenv("LANGUAGES_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                       "languages.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+LANGUAGES = _load_languages()
+
 # Languages selectable via the CLI's --lang flag.
 SUPPORTED_LANGUAGES = ["en", "en-hi", "auto"]
 

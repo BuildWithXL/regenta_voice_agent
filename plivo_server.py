@@ -27,15 +27,15 @@ from fastapi.responses import Response
 from plivo import plivoxml
 from plivo.utils.signature_v3 import validate_v3_signature
 
+import call_language
 import config
 import mongo
 import okf_store
-from ai_response import build_handoff_summary, close as close_groq, opening_line
+from ai_response import build_handoff_summary, close as close_groq, opening_lines
 from audio_sources import PhoneAudioStream
 from config import require, settings
-from conversation import END_STAGES, _TRANSFERRING, converse
+from conversation import END_STAGES, converse
 from regenta_flow import dial_number
-from sarvam_stt_client import stream_transcribe
 from session import Session, Stage, store
 from stt_router import TurnGate, with_turn_gate
 from tts_client import close as close_tts, synthesize
@@ -275,11 +275,12 @@ class _PlivoCall:
     async def run(self, session: Session) -> None:
         gate = TurnGate()
         self.audio.muted = True
-        await self.say(opening_line(session), "en")
+        for text, language in opening_lines(session):   # English, then Hindi
+            await self.say(text, language)
         self.audio.muted = False
         try:
-            raw = stream_transcribe(config.get_sarvam_api_key(), settings.PHONE_STT_LANG,
-                                    self.audio.generator())
+            # STT reconnects in the caller's language once they pick one (call_language.py)
+            raw = call_language.session_stt(session, config.get_sarvam_api_key(), self.audio)
             await converse(session, with_turn_gate(raw, gate), self.say, self.audio, gate, self.tag)
         except Exception as exc:          # STT/LLM outage: don't leave the caller in silence
             print(f"{self.tag}[plivo] call failed: {exc!r}")
@@ -289,7 +290,7 @@ class _PlivoCall:
             session.escalation_reason = "system_error"
             session.handoff_summary = build_handoff_summary(session, "system_error")
             session.set_stage(Stage.TRANSFERRED)
-            await self.say(_TRANSFERRING["en"], "en")
+            await self.say(await call_language.line(session, "transferring"), session.language)
 
         if session.stage == Stage.TRANSFERRED:
             print(f"{self.tag}[handoff] {session.handoff_summary}")
@@ -302,7 +303,7 @@ class _PlivoCall:
                 except Exception as exc:
                     print(f"{self.tag}[transfer] closing the stream socket failed: {exc!r}")
             else:                         # never leave the caller in dead air
-                await self.say(_TRANSFER_FAILED, "en")
+                await self.say(await call_language.line(session, "transfer_failed"), session.language)
                 await _hangup_call(self.call_uuid, self.tag)
         elif session.stage == Stage.COMPLETED:
             await _hangup_call(self.call_uuid, self.tag)

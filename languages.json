@@ -1,0 +1,68 @@
+{
+  "default": "en",
+  "translate_model": "openai/gpt-oss-120b",
+
+  "greeting": [
+    {"lang": "en", "text": "Thank you for calling Regenta. Which language would you like to continue in: English, Hindi or Gujarati?"},
+    {"lang": "hi", "text": "Regenta में कॉल करने के लिए धन्यवाद। आप किस भाषा में बात करना चाहेंगे: इंग्लिश, हिंदी या गुजराती?"}
+  ],
+  "ask_again": {
+    "lang": "hi",
+    "text": "Sorry, I didn't catch that. Would you like English, Hindi or Gujarati? माफ़ कीजिए, मैं समझ नहीं पाई। आप इंग्लिश, हिंदी या गुजराती, किस भाषा में बात करना चाहेंगे?"
+  },
+
+  "languages": {
+    "en": {
+      "name": "English",
+      "stt_code": "en-IN",
+      "stt_mode": "",
+      "tts_code": "en-IN",
+      "voice": "",
+      "aliases": ["english", "angrezi", "angreji", "inglish", "अंग्रेज़ी", "अंग्रेजी", "इंग्लिश", "અંગ્રેજી", "ઇંગ્લિશ"],
+      "lines": {
+        "chosen": "Sure, let's continue in English.",
+        "fallback": "Let's continue in English.",
+        "ask_city": "May I know which city you are looking for?",
+        "transferring": "Okay, transferring you to a human agent now. Please hold.",
+        "continue": "No problem, let's continue. How can I help you?",
+        "transfer_failed": "Sorry, I couldn't connect your call right now. Please call us again in a little while. Goodbye."
+      }
+    },
+    "hi": {
+      "name": "Hindi",
+      "script": "Devanagari",
+      "script_range": "ऀ-ॿ",
+      "stt_code": "hi-IN",
+      "stt_mode": "translate",
+      "tts_code": "hi-IN",
+      "voice": "",
+      "aliases": ["hindi", "hindustani", "हिंदी", "हिन्दी", "હિન્દી", "હિંદી"],
+      "style": "Speak simple everyday Hindi (Hindustani), not formal Sanskritised words; words Indians normally say in English (hotel, restaurant, check-in, banquet, lobby, spa) are fine, written in Devanagari. You are a woman: feminine forms only for yourself (सकती हूँ, जोड़ रही हूँ); address the caller with आप and neutral polite forms (चाहेंगे, बताइए), never feminine. Times: '2 PM' -> 'दोपहर 2 बजे', '11 in the morning' -> 'सुबह 11 बजे', '7:30 in the evening' -> 'शाम साढ़े 7 बजे', '11:30 at night' -> 'रात साढ़े 11 बजे', '12 noon' -> 'दोपहर 12 बजे'.",
+      "lines": {
+        "chosen": "ज़रूर, हम हिंदी में बात करते हैं।",
+        "ask_city": "क्या मैं जान सकती हूँ कि आप किस शहर में होटल ढूँढ रहे हैं?",
+        "transferring": "ठीक है, मैं आपको अभी एजेंट से जोड़ रही हूँ। कृपया प्रतीक्षा करें।",
+        "continue": "कोई बात नहीं, चलिए जारी रखते हैं। मैं आपकी कैसे मदद कर सकती हूँ?",
+        "transfer_failed": "माफ़ कीजिए, मैं अभी आपकी कॉल नहीं जोड़ पाई। कृपया थोड़ी देर बाद फिर से कॉल करें। धन्यवाद।"
+      }
+    },
+    "gu": {
+      "name": "Gujarati",
+      "script": "Gujarati",
+      "script_range": "઀-૿",
+      "stt_code": "gu-IN",
+      "stt_mode": "translate",
+      "tts_code": "gu-IN",
+      "voice": "",
+      "aliases": ["gujarati", "gujrati", "gujarathi", "गुजराती", "ગુજરાતી"],
+      "style": "Speak simple everyday Gujarati; words Gujaratis normally say in English (hotel, restaurant, check-in, banquet, lobby, spa) are fine, written in Gujarati script. You are a woman: feminine forms only for yourself (શકી, જોડી શકી); address the caller with તમે / આપ in neutral polite forms. Times: '2 PM' -> 'બપોરે 2 વાગ્યે', '11 in the morning' -> 'સવારે 11 વાગ્યે', '7:30 in the evening' -> 'સાંજે સાડા 7 વાગ્યે', '11:30 at night' -> 'રાત્રે સાડા 11 વાગ્યે', '12 noon' -> 'બપોરે 12 વાગ્યે'.",
+      "lines": {
+        "chosen": "ચોક્કસ, આપણે ગુજરાતીમાં વાત કરીએ.",
+        "ask_city": "શું હું જાણી શકું કે તમે કયા શહેરમાં હોટેલ શોધી રહ્યા છો?",
+        "transferring": "ઠીક છે, હું તમને હમણાં અમારા પ્રતિનિધિ સાથે જોડું છું. કૃપા કરીને રાહ જુઓ.",
+        "continue": "કોઈ વાંધો નહીં, ચાલો આગળ વધીએ. હું તમારી શું મદદ કરી શકું?",
+        "transfer_failed": "માફ કરશો, અત્યારે હું તમારો કૉલ જોડી શકી નહીં. કૃપા કરીને થોડી વાર પછી ફરી કૉલ કરજો. આભાર."
+      }
+    }
+  }
+}

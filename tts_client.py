@@ -21,7 +21,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from config import settings, require
+from config import LANGUAGES, settings, require
 from language_utils import detect_script_language
 
 _SAMPLE_RATE = 24000          # speech_sample_rate requested below
@@ -31,6 +31,10 @@ _BYTES_PER_FRAME = 2          # int16, mono
 _PREBUFFER_BYTES = int(_SAMPLE_RATE * _BYTES_PER_FRAME * 0.15)
 _MAX_CHARS = 3500             # Sarvam's per-request limit
 _LANG_CODES = {"en": "en-IN", "hi": "hi-IN", "gu": "gu-IN"}
+_LANG_CODES.update({k: v["tts_code"] for k, v in LANGUAGES["languages"].items() if v.get("tts_code")})
+# TTS code -> voice for that language (languages.json "voice"; empty = SARVAM_TTS_SPEAKER)
+_VOICES = {v["tts_code"]: v["voice"] for v in LANGUAGES["languages"].values()
+           if v.get("tts_code") and v.get("voice")}
 
 _client: httpx.AsyncClient | None = None
 
@@ -95,10 +99,11 @@ async def synthesize(text: str, language_code: str | None = None,
     if not text:
         return
 
+    target = _resolve_language(text, language_code)
     payload = {
         "text": text[:_MAX_CHARS],
-        "language_code": _resolve_language(text, language_code),
-        "speaker": settings.SARVAM_TTS_SPEAKER,
+        "language_code": target,
+        "speaker": _VOICES.get(target, settings.SARVAM_TTS_SPEAKER),
         "model": settings.SARVAM_TTS_MODEL,
         "output_audio_codec": "linear16",
         "speech_sample_rate": sample_rate,

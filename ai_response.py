@@ -10,6 +10,10 @@ The first caller turn picks the flow (session.flow). After that the call can
 switch: support -> regenta when its model calls startNewBooking, and
 regenta -> support when the caller asks about an existing booking.
 
+Before either flow, call_language.py asks which language to use and keeps the
+call in it: the flows read and write English, and call_language translates the
+caller's words in and each reply out.
+
 generate_reply() is still the conversation loop's single entry point.
 """
 from __future__ import annotations
@@ -17,6 +21,7 @@ from __future__ import annotations
 import re
 
 import booking_agent
+import call_language
 import regenta_flow
 import support_agent
 from session import Session, Stage
@@ -55,6 +60,17 @@ async def _to_booking(session: Session, user_message: str) -> str:
 
 
 async def generate_reply(session: Session, user_message: str) -> str:
+    """Language choice / switch first; then the flow in English, reply translated back."""
+    if session.call_language is None:
+        return await call_language.choose(session, user_message, _route)
+    english = await call_language.to_english(session, user_message)
+    switched = await call_language.switch_request(session, user_message, english)
+    if switched is not None:
+        return switched
+    return await call_language.localize(session, await _route(session, english))
+
+
+async def _route(session: Session, user_message: str) -> str:
     text = _strip_markers(user_message)
 
     if session.flow is None:
@@ -74,10 +90,19 @@ async def generate_reply(session: Session, user_message: str) -> str:
     return reply
 
 
+def opening_lines(session: Session) -> list[tuple[str, str]]:
+    """[(text, language)]: the greeting in English, then in Hindi (languages.json)."""
+    greeting = call_language.LANGUAGES["greeting"]
+    session.add_message("assistant", greeting[0]["text"])
+    return [(g["text"], g["lang"]) for g in greeting]
+
+
 def opening_line(session: Session) -> str:
-    return regenta_flow.opening_line(session)
+    """The greeting as one string (main.py, the local mic/file test)."""
+    return " ".join(text for text, _ in opening_lines(session))
 
 
 async def close() -> None:
     await booking_agent.close()
     await support_agent.close()
+    await call_language.close()

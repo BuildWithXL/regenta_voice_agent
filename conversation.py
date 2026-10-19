@@ -12,6 +12,7 @@ import time
 from typing import Awaitable, Callable, Iterable
 
 import config
+import call_language
 from ai_response import build_handoff_summary, generate_reply
 from language_utils import (
     collapse_spelled_letters, normalize_spoken_booking_id, normalize_spoken_symbols,
@@ -21,14 +22,7 @@ from stt_router import TurnGate
 
 Say = Callable[[str, str], Awaitable[None]]   # say(text, language)
 
-_TRANSFERRING = {
-    "en": "Okay, transferring you to a human agent now. Please hold.",
-    "hi": "ठीक है, मैं आपको अभी एजेंट से जोड़ रही हूँ। कृपया प्रतीक्षा करें।",
-}
-_CONTINUE = {
-    "en": "No problem, let's continue. How can I help you?",
-    "hi": "कोई बात नहीं, चलिए जारी रखते हैं। मैं आपकी कैसे मदद कर सकती हूँ?",
-}
+# The "transferring" / "continue" lines are per language in languages.json.
 
 _YES = {"yes", "yeah", "yep", "sure", "please", "ok", "okay",
         "haan", "han", "haanji", "हाँ", "हां", "जी", "ठीक", "जरूर", "ज़रूर"}
@@ -73,16 +67,16 @@ async def converse(session: Session, results: Iterable, say: Say, audio=None,
         # Answer to "transfer you to a human?" (support flow) - checked
         # BEFORE anything else because short answers like "yes" are enough.
         if session.awaiting_transfer:
-            lang = session.language if session.language in _TRANSFERRING else "en"
+            lang = session.language
             if _is_yes(result.text):
                 session.escalation_reason = "customer_accepted_transfer"
                 session.handoff_summary = build_handoff_summary(session, "customer_accepted_transfer")
                 session.set_stage(Stage.TRANSFERRED)
-                await say(_TRANSFERRING[lang], lang)
+                await say(await call_language.line(session, "transferring"), lang)
                 return
             session.awaiting_transfer = False
             if _is_no(result.text):
-                await say(_CONTINUE[lang], lang)
+                await say(await call_language.line(session, "continue"), lang)
                 continue
             # unclear answer: treat it as a normal turn
 
@@ -96,8 +90,9 @@ async def converse(session: Session, results: Iterable, say: Say, audio=None,
             return
 
         user_text = raw_text
-        session.language = result.language_code
-        if result.language_code != "en":
+        # Once the caller has chosen a language it stays (Hinglish words don't switch it).
+        session.language = session.call_language or result.language_code
+        if result.language_code != "en" and not session.call_language:
             names = {"hi": "Hindi", "gu": "Gujarati"}
             user_text = f"[caller spoke {names.get(result.language_code, result.language_code)}] {user_text}"
 

@@ -25,7 +25,14 @@ from sarvamai import AsyncSarvamAI, RealtimeAudioInput, RealtimeEnd, RealtimePin
 STT_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v4")  # or "saaras:v3-realtime"
 SILENCE_MS = os.getenv("SARVAM_STT_SILENCE_MS", "1000")
 
-LANGUAGE_CODES = {"en": "en-IN", "hi": "hi-IN", "auto": "auto"}
+LANGUAGE_CODES = {"en": "en-IN", "hi": "hi-IN", "gu": "gu-IN", "auto": "auto"}
+
+
+def _language_code(lang_key: str) -> str:
+    """'hi' -> 'hi-IN'; full codes ('gu-IN', from languages.json) pass through."""
+    if lang_key in LANGUAGE_CODES:
+        return LANGUAGE_CODES[lang_key]
+    return lang_key if "-" in (lang_key or "") else "en-IN"
 
 # saaras:v4 only: biases recognition toward these (max 50, 64 chars each).
 # Put hotel-specific words here: your city list, room types, brand name.
@@ -52,11 +59,14 @@ def _short_lang(detected: str | None, lang_key: str) -> str:
     code = (detected or "").split("-")[0].lower()
     if code in ("en", "hi", "gu"):
         return code
-    return lang_key if lang_key in ("en", "hi", "gu") else "en"
+    base = (lang_key or "").split("-")[0].lower()
+    return base if base in ("en", "hi", "gu") else "en"
 
 
-def stream_transcribe(api_key: str, lang_key: str, audio_chunks):
-    """Yields TranscriptResult: partials first, then one final per turn."""
+def stream_transcribe(api_key: str, lang_key: str, audio_chunks, mode: str | None = None):
+    """Yields TranscriptResult: partials first, then one final per turn.
+    mode: Sarvam's task on final transcripts ("translate" = English out);
+    saaras:v4 only, ignored on other models."""
     results: "queue.Queue" = queue.Queue()
     stop = threading.Event()
     done = object()
@@ -66,7 +76,7 @@ def stream_transcribe(api_key: str, lang_key: str, audio_chunks):
         client = AsyncSarvamAI(api_subscription_key=api_key)
 
         kwargs = dict(
-            language_code=LANGUAGE_CODES.get(lang_key, "en-IN"),
+            language_code=_language_code(lang_key),
             model=STT_MODEL,
             stream_type="fast",
         
@@ -74,6 +84,8 @@ def stream_transcribe(api_key: str, lang_key: str, audio_chunks):
         )
         if PROMPT:
             kwargs["prompt"] = PROMPT
+        if mode and STT_MODEL == "saaras:v4":
+            kwargs["mode"] = mode
         if STT_MODEL == "saaras:v4" and KEYTERMS:
             kwargs["keyterms"] = json.dumps(KEYTERMS)
 
