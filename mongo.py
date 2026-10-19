@@ -115,6 +115,50 @@ async def get_active_hotels() -> dict[str, str]:
     return {str(doc["_id"]): doc["name"] async for doc in cursor}
 
 
+async def get_active_cities_and_hotels() -> tuple[list[str], list[dict[str, Any]]]:
+    """Pure read — active city titles, and active hotels in them as
+    {id, name, city} (used by regenta_flow to list and match hotels)."""
+    cities = {doc["_id"]: doc["title"]
+              async for doc in _collection("cities").find({"status": "active"}, {"title": 1})}
+    cursor = _collection("hotels").find(
+        {"status": "active", "cityID": {"$in": list(cities)}}, {"name": 1, "cityID": 1})
+    hotels = [{"id": doc["_id"], "name": doc["name"], "city": cities[doc["cityID"]]}
+              async for doc in cursor]
+    return list(cities.values()), sorted(hotels, key=lambda h: h["name"])
+
+
+async def get_hotel_mobile(hotel_id: Any) -> str | None:
+    """Pure read — hotels.Mobile (room booking and banquets transfers)."""
+    doc = await _collection("hotels").find_one({"_id": hotel_id, "status": "active"}, {"Mobile": 1})
+    return (doc or {}).get("Mobile")
+
+
+async def get_restaurant_mobile(hotel_id: Any) -> str | None:
+    """Pure read — restaurants.mobile of the hotel's first active restaurant
+    that has one (restaurant transfers)."""
+    doc = await _collection("restaurants").find_one(
+        {"hotelID": hotel_id, "status": "active", "mobile": {"$nin": [None, ""]}},
+        {"mobile": 1}, sort=[("createdAt", 1)])
+    return (doc or {}).get("mobile")
+
+
+async def get_hotel_details(hotel_id: Any) -> dict[str, Any]:
+    """Pure read — what regenta_topics answers from: the hotel's overview
+    (check-in/out, address, distances), amenity titles, facility flags,
+    phone and its active restaurants (hours, numbers)."""
+    from bson import ObjectId
+    hotel = await _collection("hotels").find_one(
+        {"_id": hotel_id}, {"amenitiesIDs": 1, "spa": 1, "gym": 1, "swimmingPool": 1, "Mobile": 1}) or {}
+    ids = [ObjectId(a) for a in hotel.get("amenitiesIDs") or [] if ObjectId.is_valid(str(a))]
+    amenities = [((doc.get("title") or {}).get("EN") or "")
+                 async for doc in _collection("amenities").find({"_id": {"$in": ids}}, {"title": 1})]
+    overview = await _collection("hoteloverviews").find_one({"hotelID": hotel_id}) or {}
+    restaurants = [doc async for doc in _collection("restaurants").find(
+        {"hotelID": hotel_id, "status": "active"},
+        {"name": 1, "open_time": 1, "close_time": 1, "mobile": 1, "serves": 1}).sort("createdAt", 1)]
+    return {"hotel": hotel, "amenities": amenities, "overview": overview, "restaurants": restaurants}
+
+
 async def get_rooms_for_hotel(hotel_id: Any) -> list[dict[str, Any]]:
     """Pure read — room types at a hotel. rooms.hotelIDs stores the
     hotel's _id as a STRING (not ObjectId) — that's how the source

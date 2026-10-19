@@ -45,6 +45,8 @@ _FRAME_BYTES = _RATE * 2 // 10         # 100 ms of PCM16 per playAudio message
 # CallUUID -> caller number, from /plivo/answer until the stream starts.
 # A stream whose callId isn't here was not announced by Plivo and is refused.
 _pending_calls: dict[str, str] = {}
+# CallUUID -> number its transfer dials (the hotel's team); others use HUMAN_AGENT_NUMBER.
+_transfer_targets: dict[str, str] = {}
 
 
 @asynccontextmanager
@@ -122,18 +124,19 @@ async def answer(request: Request) -> Response:
 async def transfer(request: Request) -> Response:
     """XML for a call being handed to a human (see _transfer_call)."""
     params = await _plivo_params(request)
-    human = _plivo_number(settings.HUMAN_AGENT_NUMBER)
+    human = _plivo_number(_transfer_targets.get(params.get("CallUUID", ""))
+                          or settings.HUMAN_AGENT_NUMBER)
     legs = {_plivo_number(params.get("From", ""))[-10:], _plivo_number(params.get("To", ""))[-10:]}
     print(f"[plivo] transfer: dialing {human}; this call is From={params.get('From')} To={params.get('To')}")
     if human[-10:] in legs:
-        print("[plivo] WARNING: HUMAN_AGENT_NUMBER is the same phone as this call; it will ring busy")
+        print("[plivo] WARNING: the transfer number is the same phone as this call; it will ring busy")
     response = plivoxml.ResponseElement()
     dial = plivoxml.DialElement(caller_id=_plivo_number(settings.PLIVO_NUMBER),
         timeout=20,
         action=_public_url("/plivo/transfer-status"),
         method="POST",
     )
-    dial.add(plivoxml.NumberElement(_plivo_number(settings.HUMAN_AGENT_NUMBER)))
+    dial.add(plivoxml.NumberElement(human))
     response.add(dial)
     return _xml(response)
 
@@ -154,6 +157,7 @@ async def hangup(request: Request) -> Response:
     params = await _plivo_params(request)
     call_uuid = params.get("CallUUID", "")
     _pending_calls.pop(call_uuid, None)      # answered but the stream never started
+    _transfer_targets.pop(call_uuid, None)
     print(f"[plivo] call {call_uuid} ended ({params.get('HangupCause')}, "
           f"{params.get('Duration')}s)")
     return Response(status_code=200)
@@ -171,11 +175,13 @@ def _rest_client() -> plivo.RestClient:
     return plivo.RestClient(require("PLIVO_AUTH_ID"), require("PLIVO_AUTH_TOKEN"))
 
 
-async def _transfer_call(call_uuid: str, tag: str) -> None:
-    if not settings.HUMAN_AGENT_NUMBER:
+async def _transfer_call(call_uuid: str, tag: str, number: str | None = None) -> None:
+    if not (number or settings.HUMAN_AGENT_NUMBER):
         print(f"{tag}[plivo] HUMAN_AGENT_NUMBER not set; hanging up instead of transferring")
         await _hangup_call(call_uuid, tag)
         return
+    if number:
+        _transfer_targets[call_uuid] = number
     try:
         await asyncio.to_thread(
             _rest_client().calls.transfer, call_uuid, legs="aleg",
@@ -248,7 +254,7 @@ class _PlivoCall:
 
         if session.stage == Stage.TRANSFERRED:
             print(f"{self.tag}[handoff] {session.handoff_summary}")
-            await _transfer_call(self.call_uuid, self.tag)
+            await _transfer_call(self.call_uuid, self.tag, session.transfer_number)
         elif session.stage == Stage.COMPLETED:
             await _hangup_call(self.call_uuid, self.tag)
 

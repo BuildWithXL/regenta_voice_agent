@@ -126,6 +126,9 @@ class Session:
     completed_bookings: list = field(default_factory=list)
     interrupt: dict | None = None      # hotel question waiting for "cancel and answer, or continue?"
     info_hotel: str | None = None      # hotel the caller is asking about in INFO stage
+    selected_hotel: dict | None = None  # regenta_flow: {"id", "name", "city"} the caller picked
+    transfer_number: str | None = None  # number a transfer dials (None: HUMAN_AGENT_NUMBER)
+    regenta: dict = field(default_factory=dict)  # regenta_flow: catalogue, city, hotel list, pending transfer
     language: str = "en"     # language of the caller's most recent utterance
     available_hotels: list = None  # populated from the last list_hotels call
     available_cities: list = None  # populated from the last list_cities call
